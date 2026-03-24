@@ -4,8 +4,51 @@ const { sanitizeFileName, ensureOutputDir, downloadFile, parallelLimit } = requi
 
 // 每批请求的最大节点数
 const BATCH_SIZE = 50;
-// 并发下载数
-const DOWNLOAD_CONCURRENCY = 5;
+// 并发下载数（过高会因带宽争抢导致全部超时）
+const DOWNLOAD_CONCURRENCY = 2;
+// 渲染超时时尝试的 scale 降级序列
+const SCALE_FALLBACKS = [1, 0.75, 0.5, 0.25];
+
+/**
+ * 判断是否为 Figma 渲染超时错误
+ */
+function isRenderTimeout(err) {
+  return err.response?.status === 400 && err.response?.data?.err?.includes('timeout');
+}
+
+/**
+ * 获取单个 Frame 的图片 URL，渲染超时时自动降低 scale 重试
+ * @returns {{ imageUrl: string, usedScale: number } | null}
+ */
+async function getImageUrlWithScaleFallback(client, fileKey, frame, requestedScale) {
+  // 先用原始 scale 尝试
+  try {
+    const urls = await getImageUrls(client, fileKey, [frame.nodeId], requestedScale);
+    if (urls[frame.nodeId]) {
+      return { imageUrl: urls[frame.nodeId], usedScale: requestedScale };
+    }
+  } catch (err) {
+    if (!isRenderTimeout(err)) throw err;
+  }
+
+  // 原始 scale 渲染超时，尝试更小的 scale
+  const fallbacks = SCALE_FALLBACKS.filter((s) => s < requestedScale);
+  for (const fallbackScale of fallbacks) {
+    console.log(`      ↻ ${frame.frameName} 渲染超时，尝试 scale=${fallbackScale}...`);
+    try {
+      const urls = await getImageUrls(client, fileKey, [frame.nodeId], fallbackScale);
+      if (urls[frame.nodeId]) {
+        console.log(`      ✓ ${frame.frameName} 在 scale=${fallbackScale} 下渲染成功`);
+        return { imageUrl: urls[frame.nodeId], usedScale: fallbackScale };
+      }
+    } catch (retryErr) {
+      if (!isRenderTimeout(retryErr)) throw retryErr;
+    }
+  }
+
+  console.log(`      ✗ ${frame.frameName} 所有 scale 均渲染失败`);
+  return null;
+}
 
 /**
  * 从文件结构中提取所有顶层 Frame
@@ -82,10 +125,12 @@ async function exportFile(client, fileKey, scale, outputDir, pageFilter) {
   }
   console.log(`   找到 ${frames.length} 个顶层 Frame`);
 
-  // 分批获取图片 URL（渲染超时时自动降级为逐个请求）
+  // 分批获取图片 URL（渲染超时时自动降级为逐个请求，再降 scale 重试）
   console.log('   🖼️  获取图片 URL...');
   const batches = chunk(frames, BATCH_SIZE);
   const imageUrlMap = {};
+  // 记录每个 frame 实际使用的 scale（降级后可能不同）
+  const frameScaleMap = {};
 
   for (let i = 0; i < batches.length; i++) {
     const batch = batches[i];
@@ -95,18 +140,18 @@ async function exportFile(client, fileKey, scale, outputDir, pageFilter) {
     try {
       const urls = await getImageUrls(client, fileKey, nodeIds, scale);
       Object.assign(imageUrlMap, urls);
+      for (const id of nodeIds) frameScaleMap[id] = scale;
     } catch (err) {
       // 渲染超时，降级为逐个请求
-      if (err.response?.status === 400 && err.response?.data?.err?.includes('timeout')) {
+      if (isRenderTimeout(err)) {
         console.log('   ⚠️  批量渲染超时，切换为逐个请求...');
         for (let j = 0; j < batch.length; j++) {
           const frame = batch[j];
           console.log(`   逐个请求 ${j + 1}/${batch.length}: ${frame.frameName}`);
-          try {
-            const urls = await getImageUrls(client, fileKey, [frame.nodeId], scale);
-            Object.assign(imageUrlMap, urls);
-          } catch (singleErr) {
-            console.log(`   ⚠️  ${frame.frameName} 渲染失败: ${singleErr.message}`);
+          const url = await getImageUrlWithScaleFallback(client, fileKey, frame, scale);
+          if (url) {
+            imageUrlMap[frame.nodeId] = url.imageUrl;
+            frameScaleMap[frame.nodeId] = url.usedScale;
           }
         }
       } else {
@@ -138,7 +183,8 @@ async function exportFile(client, fileKey, scale, outputDir, pageFilter) {
       try {
         await downloadFile(url, filePath);
         success++;
-        console.log(`   ✅ ${fileName}/${frame.pageNname}/${framePngName}`);
+        const scaleNote = frameScaleMap[frame.nodeId] !== scale ? ` (scale=${frameScaleMap[frame.nodeId]})` : '';
+        console.log(`   ✅ ${fileName}/${frame.pageNname}/${framePngName}${scaleNote}`);
       } catch (err) {
         fail++;
         failures.push({ frame, reason: err.message });

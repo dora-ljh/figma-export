@@ -28,7 +28,7 @@ function sleep(ms) {
 /**
  * 下载文件到本地
  */
-async function downloadFile(url, filePath, timeoutMs = 120000) {
+async function downloadOnce(url, filePath, timeoutMs) {
   const response = await axios({
     method: 'GET',
     url,
@@ -64,6 +64,31 @@ async function downloadFile(url, filePath, timeoutMs = 120000) {
     writer.on('error', (err) => fail(err));
     response.data.on('error', (err) => fail(err));
   });
+}
+
+/**
+ * 带重试的下载，每次重试增加超时时间
+ */
+const DOWNLOAD_MAX_RETRIES = 3;
+const DOWNLOAD_BASE_TIMEOUT = 300000; // 5分钟
+
+async function downloadFile(url, filePath) {
+  for (let attempt = 0; attempt <= DOWNLOAD_MAX_RETRIES; attempt++) {
+    try {
+      // 每次重试超时翻倍：3分钟 → 6分钟 → 12分钟
+      const timeoutMs = DOWNLOAD_BASE_TIMEOUT * Math.pow(2, attempt);
+      await downloadOnce(url, filePath, timeoutMs);
+      return;
+    } catch (err) {
+      if (attempt < DOWNLOAD_MAX_RETRIES) {
+        const waitSec = (attempt + 1) * 3;
+        console.log(`      ↻ 下载失败（${err.message}），${waitSec}s 后第 ${attempt + 1} 次重试...`);
+        await sleep(waitSec * 1000);
+      } else {
+        throw err;
+      }
+    }
+  }
 }
 
 /**
