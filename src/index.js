@@ -9,6 +9,7 @@ program
   .option('--scale <number>', '导出缩放比例（0.01-4）', '0.25')
   .option('--output <path>', '输出目录', './output')
   .option('--page <name...>', '只导出指定页面（可多次指定）')
+  .option('--shard <index/total>', '分片参数，如 1/3 表示共3片取第1片')
   .parse(process.argv);
 
 const opts = program.opts();
@@ -30,6 +31,23 @@ if (!token || token === 'your_figma_token_here') {
   process.exit(1);
 }
 
+// 校验 shard
+let shard = null;
+if (opts.shard) {
+  const match = opts.shard.match(/^(\d+)\/(\d+)$/);
+  if (!match) {
+    console.error('❌ --shard 格式错误，应为 index/total，如 1/3');
+    process.exit(1);
+  }
+  const shardIndex = parseInt(match[1], 10);
+  const shardTotal = parseInt(match[2], 10);
+  if (shardIndex < 1 || shardIndex > shardTotal || shardTotal < 1) {
+    console.error('❌ --shard 参数无效，index 必须在 1 到 total 之间');
+    process.exit(1);
+  }
+  shard = { index: shardIndex, total: shardTotal };
+}
+
 // 校验 scale
 const scale = parseFloat(opts.scale);
 if (isNaN(scale) || scale < 0.01 || scale > 4) {
@@ -46,6 +64,7 @@ run({
   scale,
   output: opts.output,
   page: opts.page,
+  shard,
 }).catch((err) => {
   console.error('\n❌ 导出失败:', err.message);
   if (err.response?.status === 403) {

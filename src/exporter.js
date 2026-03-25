@@ -236,7 +236,7 @@ async function exportFile(client, fileKey, scale, outputDir, pageFilter) {
  * 主导出流程
  */
 async function run(options) {
-  const { token, fileKey, projectId, teamId, scale, output, page } = options;
+  const { token, fileKey, projectId, teamId, scale, output, page, shard } = options;
   const pageFilter = page || [];
   const client = createClient(token);
 
@@ -276,6 +276,16 @@ async function run(options) {
   if (files.length === 0) {
     console.log('⚠️  未找到任何文件');
     return;
+  }
+
+  // 按 file.key 排序，确保不同机器上的顺序一致（分片依赖稳定排序）
+  files.sort((a, b) => a.key.localeCompare(b.key));
+
+  // 分片过滤
+  if (shard) {
+    const totalFiles = files.length;
+    files = files.filter((_, i) => i % shard.total === shard.index - 1);
+    console.log(`\n🔀 分片 ${shard.index}/${shard.total}：总 ${totalFiles} 个文件，本片 ${files.length} 个`);
   }
 
   console.log(`\n📊 共 ${files.length} 个文件待导出\n${'─'.repeat(50)}`);
