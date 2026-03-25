@@ -95,6 +95,7 @@ figma-export --team-id <team_id>
 | `--page <name...>` | 只导出指定页面（可多次指定） | 全部页面 |
 | `--shard <index/total>` | 分片参数，如 1/3 表示共3片取第1片 | - |
 | `--max-width <number>` | 导出图片最大宽度，超过时自动降低 scale | `3840` |
+| `--max-retries <number>` | API 请求最大重试次数，`0` 为无限重试 | `3` |
 
 > 注意：`--file-key`、`--project-id`、`--team-id` 三者至少提供一个。
 

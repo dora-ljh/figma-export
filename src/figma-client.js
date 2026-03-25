@@ -1,13 +1,14 @@
 const axios = require('axios');
 const { sleep } = require('./utils');
 
-const MAX_RETRIES = 3;
 const BASE_URL = 'https://api.figma.com/v1';
 
 /**
  * 创建带重试逻辑的 Figma API 客户端
+ * @param {string} token - Figma API Token
+ * @param {number} maxRetries - 最大重试次数，0 表示无限重试
  */
-function createClient(token) {
+function createClient(token, maxRetries = 3) {
   const instance = axios.create({
     baseURL: BASE_URL,
     headers: {
@@ -21,7 +22,7 @@ function createClient(token) {
     const config = error.config;
     config.__retryCount = config.__retryCount || 0;
 
-    if (config.__retryCount >= MAX_RETRIES) {
+    if (maxRetries > 0 && config.__retryCount >= maxRetries) {
       throw error;
     }
 

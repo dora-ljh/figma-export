@@ -26,6 +26,7 @@ const exportCmd = program
   .option('--page <name...>', '只导出指定页面（可多次指定）')
   .option('--shard <index/total>', '分片参数，如 1/3 表示共3片取第1片')
   .option('--max-width <number>', '导出图片最大宽度（超过时自动降低 scale）', '3840')
+  .option('--max-retries <number>', 'API 请求最大重试次数（0 为无限重试）', '3')
   .action((opts) => {
     // 校验：至少提供一个目标参数
     if (!opts.fileKey && !opts.projectId && !opts.teamId) {
@@ -77,6 +78,13 @@ const exportCmd = program
       process.exit(1);
     }
 
+    // 校验 maxRetries
+    const maxRetries = parseInt(opts.maxRetries, 10);
+    if (isNaN(maxRetries) || maxRetries < 0) {
+      console.error('❌ max-retries 参数必须为非负整数');
+      process.exit(1);
+    }
+
     // 启动导出
     run({
       token,
@@ -88,6 +96,7 @@ const exportCmd = program
       page: opts.page,
       shard,
       maxWidth,
+      maxRetries,
     }).catch((err) => {
       console.error('\n❌ 导出失败:', err.message);
       if (err.response?.status === 403) {

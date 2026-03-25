@@ -258,9 +258,9 @@ async function exportFile(client, fileKey, scale, outputDir, pageFilter, maxWidt
  * 主导出流程
  */
 async function run(options) {
-  const { token, fileKey, projectId, teamId, scale, output, page, shard, maxWidth } = options;
+  const { token, fileKey, projectId, teamId, scale, output, page, shard, maxWidth, maxRetries } = options;
   const pageFilter = page || [];
-  const client = createClient(token);
+  const client = createClient(token, maxRetries);
 
   console.log(`🚀 Figma 批量导出工具`);
   console.log(`   缩放比例: ${scale}x | 输出目录: ${output}`);
