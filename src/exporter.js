@@ -89,6 +89,7 @@ function extractTopFrames(fileData, pageFilter) {
         pageNname: page.name,
         frameName: fileName,
         nodeId: frame.id,
+        frameWidth: frame.absoluteBoundingBox?.width || 0,
       });
     }
   }
@@ -111,7 +112,7 @@ function chunk(arr, size) {
  * 导出单个 Figma 文件
  * @returns {{ success: number, fail: number }} 导出统计
  */
-async function exportFile(client, fileKey, scale, outputDir, pageFilter) {
+async function exportFile(client, fileKey, scale, outputDir, pageFilter, maxWidth) {
   // 获取文件结构
   console.log('\n📂 获取文件结构...');
   const fileData = await getFileStructure(client, fileKey);
@@ -152,37 +153,58 @@ async function exportFile(client, fileKey, scale, outputDir, pageFilter) {
     return { success: skippedCount, fail: 0 };
   }
 
+  // 为每个 frame 计算实际 scale（根据 maxWidth 限制）
+  const frameScaleMap = {};
+  for (const frame of pendingFrames) {
+    if (maxWidth && frame.frameWidth > 0 && frame.frameWidth * scale > maxWidth) {
+      const actualScale = Math.floor((maxWidth / frame.frameWidth) * 100) / 100;
+      frameScaleMap[frame.nodeId] = Math.max(0.01, Math.min(actualScale, scale));
+      console.log(`   📐 ${frame.frameName} 宽度 ${frame.frameWidth}px，scale ${scale} → ${frameScaleMap[frame.nodeId]}（限制最大宽度 ${maxWidth}px）`);
+    } else {
+      frameScaleMap[frame.nodeId] = scale;
+    }
+  }
+
+  // 按 scale 分组，相同 scale 的 frame 可以批量请求
+  const scaleGroups = {};
+  for (const frame of pendingFrames) {
+    const s = frameScaleMap[frame.nodeId];
+    if (!scaleGroups[s]) scaleGroups[s] = [];
+    scaleGroups[s].push(frame);
+  }
+
   // 分批获取图片 URL（渲染超时时自动降级为逐个请求，再降 scale 重试）
   console.log(`   🖼️  获取 ${pendingFrames.length} 个 Frame 的图片 URL...`);
-  const batches = chunk(pendingFrames, BATCH_SIZE);
   const imageUrlMap = {};
-  // 记录每个 frame 实际使用的 scale（降级后可能不同）
-  const frameScaleMap = {};
 
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i];
-    const nodeIds = batch.map((f) => f.nodeId);
-    console.log(`   批次 ${i + 1}/${batches.length}（${nodeIds.length} 个节点）`);
+  for (const [groupScale, groupFrames] of Object.entries(scaleGroups)) {
+    const currentScale = parseFloat(groupScale);
+    const batches = chunk(groupFrames, BATCH_SIZE);
 
-    try {
-      const urls = await getImageUrls(client, fileKey, nodeIds, scale);
-      Object.assign(imageUrlMap, urls);
-      for (const id of nodeIds) frameScaleMap[id] = scale;
-    } catch (err) {
-      // 渲染超时，降级为逐个请求
-      if (isRenderTimeout(err)) {
-        console.log('   ⚠️  批量渲染超时，切换为逐个请求...');
-        for (let j = 0; j < batch.length; j++) {
-          const frame = batch[j];
-          console.log(`   逐个请求 ${j + 1}/${batch.length}: ${frame.frameName}`);
-          const url = await getImageUrlWithScaleFallback(client, fileKey, frame, scale);
-          if (url) {
-            imageUrlMap[frame.nodeId] = url.imageUrl;
-            frameScaleMap[frame.nodeId] = url.usedScale;
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      const nodeIds = batch.map((f) => f.nodeId);
+      console.log(`   批次（scale=${currentScale}）${i + 1}/${batches.length}（${nodeIds.length} 个节点）`);
+
+      try {
+        const urls = await getImageUrls(client, fileKey, nodeIds, currentScale);
+        Object.assign(imageUrlMap, urls);
+      } catch (err) {
+        // 渲染超时，降级为逐个请求
+        if (isRenderTimeout(err)) {
+          console.log('   ⚠️  批量渲染超时，切换为逐个请求...');
+          for (let j = 0; j < batch.length; j++) {
+            const frame = batch[j];
+            console.log(`   逐个请求 ${j + 1}/${batch.length}: ${frame.frameName}`);
+            const url = await getImageUrlWithScaleFallback(client, fileKey, frame, currentScale);
+            if (url) {
+              imageUrlMap[frame.nodeId] = url.imageUrl;
+              frameScaleMap[frame.nodeId] = url.usedScale;
+            }
           }
+        } else {
+          throw err;
         }
-      } else {
-        throw err;
       }
     }
   }
@@ -236,7 +258,7 @@ async function exportFile(client, fileKey, scale, outputDir, pageFilter) {
  * 主导出流程
  */
 async function run(options) {
-  const { token, fileKey, projectId, teamId, scale, output, page, shard } = options;
+  const { token, fileKey, projectId, teamId, scale, output, page, shard, maxWidth } = options;
   const pageFilter = page || [];
   const client = createClient(token);
 
@@ -304,7 +326,7 @@ async function run(options) {
         ? path.join(output, sanitizeFileName(file.projectName))
         : output;
 
-      const result = await exportFile(client, file.key, scale, fileOutputDir, pageFilter);
+      const result = await exportFile(client, file.key, scale, fileOutputDir, pageFilter, maxWidth);
       totalSuccess += result.success;
       totalFail += result.fail;
     } catch (err) {

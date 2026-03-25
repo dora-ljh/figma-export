@@ -94,6 +94,7 @@ figma-export --team-id <team_id>
 | `--output <path>` | 输出目录 | `./output` |
 | `--page <name...>` | 只导出指定页面（可多次指定） | 全部页面 |
 | `--shard <index/total>` | 分片参数，如 1/3 表示共3片取第1片 | - |
+| `--max-width <number>` | 导出图片最大宽度，超过时自动降低 scale | `3840` |
 
 > 注意：`--file-key`、`--project-id`、`--team-id` 三者至少提供一个。
 
@@ -109,9 +110,45 @@ figma-export --project-id 12345 --output ./designs
 # 只导出指定页面
 figma-export --file-key abc123 --page "首页" --page "详情页"
 
+# 高倍缩放导出，限制最大宽度为 3840px
+figma-export --file-key abc123 --scale 4 --max-width 3840
+
 # 分片导出（适合大团队并行处理）
 figma-export --team-id 67890 --shard 1/3
 ```
+
+### 最大宽度限制
+
+使用 `--max-width` 可以限制导出图片的最大宽度。工具会根据每个 Frame 的原始宽度自动计算合适的 scale，确保导出图片宽度不超过限制，无需下载后再压缩。
+
+例如：一个 1920px 宽的 Frame，`--scale 4` 时导出宽度为 7680px，超过 3840px 限制后会自动降为 `scale=2`（3840÷1920=2），使导出宽度刚好为 3840px。
+
+```bash
+# 默认限制 3840px
+figma-export --file-key abc123 --scale 4
+
+# 自定义最大宽度
+figma-export --file-key abc123 --scale 4 --max-width 1920
+```
+
+### 合并分片目录
+
+多人分片下载完成后，将各自的输出目录收集到一起，使用 `merge` 命令合并：
+
+```bash
+# 合并多个分片输出目录
+figma-export merge -i ./shard1-output ./shard2-output ./shard3-output -o ./merged
+
+# 自定义输出目录（默认 ./merged）
+figma-export merge -i ./person1 ./person2 -o ./all-designs
+```
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `-i, --input <dirs...>` | 输入目录列表（空格分隔） | 必填 |
+| `-o, --output <path>` | 合并输出目录 | `./merged` |
+
+> 合并时会自动跳过已存在且大小相同的文件，支持增量合并。
 
 ## 如何获取 File Key / Project ID / Team ID
 
