@@ -3,7 +3,12 @@ require('dotenv').config();
 const { program } = require('commander');
 const { run } = require('./exporter');
 
+const { version, description } = require('../package.json');
+
 program
+  .name('figma-export')
+  .description(description)
+  .version(version, '-v, --version')
   .option('--file-key <key>', 'Figma 文件 key（导出单个文件）')
   .option('--project-id <id>', '项目 ID（导出项目下所有文件）')
   .option('--team-id <id>', '团队 ID（导出团队下所有项目的所有文件）')
