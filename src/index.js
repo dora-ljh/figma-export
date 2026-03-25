@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 require('dotenv').config();
 const { program } = require('commander');
 const { run } = require('./exporter');
@@ -6,6 +7,7 @@ program
   .option('--file-key <key>', 'Figma 文件 key（导出单个文件）')
   .option('--project-id <id>', '项目 ID（导出项目下所有文件）')
   .option('--team-id <id>', '团队 ID（导出团队下所有项目的所有文件）')
+  .option('--token <token>', 'Figma 个人访问令牌（也可通过环境变量 FIGMA_TOKEN 设置）')
   .option('--scale <number>', '导出缩放比例（0.01-4）', '0.25')
   .option('--output <path>', '输出目录', './output')
   .option('--page <name...>', '只导出指定页面（可多次指定）')
@@ -24,10 +26,12 @@ if (!opts.fileKey && !opts.projectId && !opts.teamId) {
   process.exit(1);
 }
 
-// 校验 token
-const token = process.env.FIGMA_TOKEN;
+// 校验 token（优先使用 --token 参数，其次读取环境变量）
+const token = opts.token || process.env.FIGMA_TOKEN;
 if (!token || token === 'your_figma_token_here') {
-  console.error('❌ 请在 .env 文件中设置 FIGMA_TOKEN');
+  console.error('❌ 请通过 --token 参数或环境变量 FIGMA_TOKEN 提供 Figma 访问令牌');
+  console.error('   figma-export --token <your_token> --file-key <key>');
+  console.error('   或设置环境变量：export FIGMA_TOKEN=<your_token>');
   process.exit(1);
 }
 

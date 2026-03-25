@@ -1,10 +1,40 @@
 {
   "name": "figma-export",
   "version": "1.0.0",
-  "private": true,
+  "description": "Figma 设计稿批量导出工具，支持按文件、项目、团队三个维度批量导出设计稿为图片",
+  "main": "src/index.js",
+  "bin": {
+    "figma-export": "src/index.js"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "start": "node src/index.js",
     "export": "node src/index.js"
+  },
+  "keywords": [
+    "figma",
+    "export",
+    "design",
+    "batch",
+    "cli",
+    "image"
+  ],
+  "author": "dora-ljh <lijihui.wyy@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dora-ljh/figma-export.git"
+  },
+  "homepage": "https://github.com/dora-ljh/figma-export#readme",
+  "bugs": {
+    "url": "https://github.com/dora-ljh/figma-export/issues"
+  },
+  "engines": {
+    "node": ">=14.0.0"
   },
   "dependencies": {
     "axios": "^1.7.0",
