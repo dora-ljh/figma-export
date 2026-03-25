@@ -1,5 +1,5 @@
 {
-  "name": "figma-export",
+  "name": "@dora-ljh/figma-export",
   "version": "1.0.0",
   "description": "Figma 设计稿批量导出工具，支持按文件、项目、团队三个维度批量导出设计稿为图片",
   "main": "src/index.js",
