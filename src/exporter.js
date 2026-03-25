@@ -1,4 +1,5 @@
 const path = require('path');
+const fse = require('fs-extra');
 const { createClient, getFileStructure, getImageUrls, getTeamProjects, getProjectFiles } = require('./figma-client');
 const { sanitizeFileName, ensureOutputDir, downloadFile, parallelLimit } = require('./utils');
 
@@ -125,9 +126,35 @@ async function exportFile(client, fileKey, scale, outputDir, pageFilter) {
   }
   console.log(`   找到 ${frames.length} 个顶层 Frame`);
 
+  // 过滤掉已下载的 frame（断点续传）
+  const pendingFrames = [];
+  let skippedCount = 0;
+  for (const frame of frames) {
+    const dirPath = path.join(outputDir, fileName, sanitizeFileName(frame.pageNname));
+    const framePngName = `${sanitizeFileName(frame.frameName)}.png`;
+    const filePath = path.join(dirPath, framePngName);
+    if (await fse.pathExists(filePath)) {
+      const stat = await fse.stat(filePath);
+      if (stat.size > 0) {
+        skippedCount++;
+        continue;
+      }
+    }
+    pendingFrames.push(frame);
+  }
+
+  if (skippedCount > 0) {
+    console.log(`   ⏭️  跳过 ${skippedCount} 个已下载的 Frame`);
+  }
+
+  if (pendingFrames.length === 0) {
+    console.log('   ✅ 全部已下载，无需重复导出');
+    return { success: skippedCount, fail: 0 };
+  }
+
   // 分批获取图片 URL（渲染超时时自动降级为逐个请求，再降 scale 重试）
-  console.log('   🖼️  获取图片 URL...');
-  const batches = chunk(frames, BATCH_SIZE);
+  console.log(`   🖼️  获取 ${pendingFrames.length} 个 Frame 的图片 URL...`);
+  const batches = chunk(pendingFrames, BATCH_SIZE);
   const imageUrlMap = {};
   // 记录每个 frame 实际使用的 scale（降级后可能不同）
   const frameScaleMap = {};
@@ -166,7 +193,7 @@ async function exportFile(client, fileKey, scale, outputDir, pageFilter) {
   let fail = 0;
   const failures = [];
 
-  const downloadTasks = frames.map((frame) => {
+  const downloadTasks = pendingFrames.map((frame) => {
     return async () => {
       const url = imageUrlMap[frame.nodeId];
       if (!url) {
@@ -202,7 +229,7 @@ async function exportFile(client, fileKey, scale, outputDir, pageFilter) {
     }
   }
 
-  return { success, fail };
+  return { success: success + skippedCount, fail };
 }
 
 /**
