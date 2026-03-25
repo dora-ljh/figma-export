@@ -23,7 +23,25 @@ npm install -g figma-export
 
 ### 配置 Figma Token
 
-获取 Token：前往 [Figma Settings](https://www.figma.com/developers/api#access-tokens) 创建个人访问令牌。
+#### 1. 创建个人访问令牌
+
+1. 登录 [Figma](https://www.figma.com)，点击左上角头像，进入 **Settings**
+2. 滚动到 **Personal access tokens** 部分
+3. 点击 **Generate new token**
+4. 输入 Token 名称（如 `figma-export`）
+5. 配置 Token 权限（Scopes），需要勾选以下权限：
+
+| Scope 分类 | 权限 | 用途 |
+|------------|------|------|
+| **Files** | ✅ Read the contents of and render images from files | 获取文件结构、Frame 信息并渲染导出图片 |
+| **Files** | ✅ Read metadata of files | 读取文件元数据 |
+| **Projects** | ✅ Read team project structure | 按项目/团队批量获取文件列表 |
+
+> 如果你只使用 `--file-key` 导出单个文件，只需 **Files** 相关权限。使用 `--project-id` 或 `--team-id` 时需要额外勾选 **Projects** 权限。
+
+6. 点击 **Generate token**，复制生成的 Token（**只会显示一次**，请妥善保存）
+
+#### 2. 配置 Token
 
 提供 Token 有三种方式（任选其一）：
 
