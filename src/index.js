@@ -27,6 +27,7 @@ const exportCmd = program
   .option('--shard <index/total>', '分片参数，如 1/3 表示共3片取第1片')
   .option('--max-width <number>', '导出图片最大宽度（超过时自动降低 scale）', '3840')
   .option('--max-retries <number>', 'API 请求最大重试次数（0 为无限重试）', '3')
+  .option('--no-cache', '忽略缓存，强制重新获取文件结构')
   .action((opts) => {
     // 校验：至少提供一个目标参数
     if (!opts.fileKey && !opts.projectId && !opts.teamId) {
@@ -97,6 +98,7 @@ const exportCmd = program
       shard,
       maxWidth,
       maxRetries,
+      noCache: opts.cache === false,
     }).catch((err) => {
       console.error('\n❌ 导出失败:', err.message);
       if (err.response?.status === 403) {

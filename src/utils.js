@@ -115,10 +115,59 @@ async function parallelLimit(tasks, limit) {
   return Promise.all(results);
 }
 
+const CACHE_FILE_NAME = '.figma-export-cache.json';
+
+/**
+ * 加载缓存文件，不存在或损坏返回 null
+ */
+async function loadCache(outputDir) {
+  try {
+    const cachePath = path.join(outputDir, CACHE_FILE_NAME);
+    const cache = await fse.readJson(cachePath);
+    if (cache.version !== 1) return null;
+    return cache;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 保存缓存文件
+ */
+async function saveCache(outputDir, cacheData) {
+  await fse.ensureDir(outputDir);
+  cacheData.updatedAt = new Date().toISOString();
+  const cachePath = path.join(outputDir, CACHE_FILE_NAME);
+  await fse.writeJson(cachePath, cacheData, { spaces: 2 });
+}
+
+/**
+ * 校验缓存是否与当前选项匹配
+ */
+function isCacheValid(cache, currentOptions) {
+  if (!cache || !cache.options) return false;
+  const cached = cache.options;
+  // 比较影响目录结构的参数
+  if ((cached.teamId || null) !== (currentOptions.teamId || null)) return false;
+  if ((cached.projectId || null) !== (currentOptions.projectId || null)) return false;
+  if ((cached.fileKey || null) !== (currentOptions.fileKey || null)) return false;
+  // 比较 page 数组（排序后对比）
+  const cachedPage = [...(cached.page || [])].sort();
+  const currentPage = [...(currentOptions.page || [])].sort();
+  if (cachedPage.length !== currentPage.length) return false;
+  for (let i = 0; i < cachedPage.length; i++) {
+    if (cachedPage[i] !== currentPage[i]) return false;
+  }
+  return true;
+}
+
 module.exports = {
   sanitizeFileName,
   ensureOutputDir,
   sleep,
   downloadFile,
   parallelLimit,
+  loadCache,
+  saveCache,
+  isCacheValid,
 };

@@ -1,7 +1,7 @@
 const path = require('path');
 const fse = require('fs-extra');
 const { createClient, getFileStructure, getImageUrls, getTeamProjects, getProjectFiles } = require('./figma-client');
-const { sanitizeFileName, ensureOutputDir, downloadFile, parallelLimit } = require('./utils');
+const { sanitizeFileName, ensureOutputDir, downloadFile, parallelLimit, loadCache, saveCache, isCacheValid } = require('./utils');
 
 // 每批请求的最大节点数
 const BATCH_SIZE = 50;
@@ -112,15 +112,35 @@ function chunk(arr, size) {
  * 导出单个 Figma 文件
  * @returns {{ success: number, fail: number }} 导出统计
  */
-async function exportFile(client, fileKey, scale, outputDir, pageFilter, maxWidth) {
-  // 获取文件结构
-  console.log('\n📂 获取文件结构...');
-  const fileData = await getFileStructure(client, fileKey);
-  const fileName = sanitizeFileName(fileData.name);
-  console.log(`   文件名: ${fileData.name}`);
+async function exportFile(client, fileKey, scale, outputDir, pageFilter, maxWidth, cache, cacheOutputDir) {
+  // 查找缓存中的文件数据
+  const cachedFile = cache?.files?.find((f) => f.key === fileKey);
+  let frames;
+  let fileName;
 
-  // 提取顶层 Frame
-  const frames = extractTopFrames(fileData, pageFilter);
+  if (cachedFile?.frames) {
+    // 使用缓存的文件结构
+    console.log('\n📂 使用缓存的文件结构...');
+    fileName = sanitizeFileName(cachedFile.name);
+    frames = cachedFile.frames;
+    console.log(`   文件名: ${cachedFile.name}`);
+  } else {
+    // 从 API 获取文件结构
+    console.log('\n📂 获取文件结构...');
+    const fileData = await getFileStructure(client, fileKey);
+    fileName = sanitizeFileName(fileData.name);
+    console.log(`   文件名: ${fileData.name}`);
+
+    frames = extractTopFrames(fileData, pageFilter);
+
+    // 更新缓存
+    if (cachedFile) {
+      cachedFile.frames = frames;
+      cachedFile.name = fileData.name;
+      await saveCache(cacheOutputDir, cache);
+    }
+  }
+
   if (frames.length === 0) {
     console.log('   ⚠️  未找到任何顶层 Frame，跳过');
     return { success: 0, fail: 0 };
@@ -258,46 +278,72 @@ async function exportFile(client, fileKey, scale, outputDir, pageFilter, maxWidt
  * 主导出流程
  */
 async function run(options) {
-  const { token, fileKey, projectId, teamId, scale, output, page, shard, maxWidth, maxRetries } = options;
+  const { token, fileKey, projectId, teamId, scale, output, page, shard, maxWidth, maxRetries, noCache } = options;
   const pageFilter = page || [];
   const client = createClient(token, maxRetries);
 
   console.log(`🚀 Figma 批量导出工具`);
   console.log(`   缩放比例: ${scale}x | 输出目录: ${output}`);
 
-  // 收集要导出的文件列表 [{ key, name }]
+  // 尝试加载缓存
+  let cache = null;
   let files = [];
+  const cacheOptions = { teamId: teamId || null, projectId: projectId || null, fileKey: fileKey || null, page: pageFilter };
 
-  if (teamId) {
-    // 团队模式：获取所有项目 → 所有文件
-    console.log(`\n📋 获取团队 ${teamId} 下的所有项目...`);
-    const projects = await getTeamProjects(client, teamId);
-    console.log(`   找到 ${projects.length} 个项目`);
-
-    for (const project of projects) {
-      console.log(`\n   📁 项目: ${project.name}`);
-      const projectData = await getProjectFiles(client, project.id);
-      for (const file of projectData.files) {
-        files.push({ key: file.key, name: file.name, projectName: project.name });
-      }
-      console.log(`      ${projectData.files.length} 个文件`);
+  if (!noCache) {
+    cache = await loadCache(output);
+    if (cache && isCacheValid(cache, cacheOptions)) {
+      console.log('\n📦 使用缓存的文件列表');
+      files = cache.files;
+    } else {
+      cache = null;
     }
-  } else if (projectId) {
-    // 项目模式：获取项目下所有文件
-    console.log(`\n📋 获取项目 ${projectId} 下的文件...`);
-    const projectData = await getProjectFiles(client, projectId);
-    console.log(`   项目: ${projectData.name}，共 ${projectData.files.length} 个文件`);
-    for (const file of projectData.files) {
-      files.push({ key: file.key, name: file.name, projectName: projectData.name });
-    }
-  } else if (fileKey) {
-    // 单文件模式
-    files.push({ key: fileKey, name: '', projectName: '' });
   }
 
+  // 缓存未命中，从 API 获取文件列表
   if (files.length === 0) {
-    console.log('⚠️  未找到任何文件');
-    return;
+    if (teamId) {
+      // 团队模式：获取所有项目 → 所有文件
+      console.log(`\n📋 获取团队 ${teamId} 下的所有项目...`);
+      const projects = await getTeamProjects(client, teamId);
+      console.log(`   找到 ${projects.length} 个项目`);
+
+      for (const project of projects) {
+        console.log(`\n   📁 项目: ${project.name}`);
+        const projectData = await getProjectFiles(client, project.id);
+        for (const file of projectData.files) {
+          files.push({ key: file.key, name: file.name, projectName: project.name });
+        }
+        console.log(`      ${projectData.files.length} 个文件`);
+      }
+    } else if (projectId) {
+      // 项目模式：获取项目下所有文件
+      console.log(`\n📋 获取项目 ${projectId} 下的文件...`);
+      const projectData = await getProjectFiles(client, projectId);
+      console.log(`   项目: ${projectData.name}，共 ${projectData.files.length} 个文件`);
+      for (const file of projectData.files) {
+        files.push({ key: file.key, name: file.name, projectName: projectData.name });
+      }
+    } else if (fileKey) {
+      // 单文件模式
+      files.push({ key: fileKey, name: '', projectName: '' });
+    }
+
+    if (files.length === 0) {
+      console.log('⚠️  未找到任何文件');
+      return;
+    }
+
+    // 初始化缓存（frames 为 null，后续逐个填充）
+    cache = {
+      version: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      options: cacheOptions,
+      files: files.map((f) => ({ ...f, frames: null })),
+    };
+    await saveCache(output, cache);
+    console.log('💾 已缓存文件列表');
   }
 
   // 按 file.key 排序，确保不同机器上的顺序一致（分片依赖稳定排序）
@@ -326,7 +372,7 @@ async function run(options) {
         ? path.join(output, sanitizeFileName(file.projectName))
         : output;
 
-      const result = await exportFile(client, file.key, scale, fileOutputDir, pageFilter, maxWidth);
+      const result = await exportFile(client, file.key, scale, fileOutputDir, pageFilter, maxWidth, cache, output);
       totalSuccess += result.success;
       totalFail += result.fail;
     } catch (err) {
