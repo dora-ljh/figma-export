@@ -33,6 +33,9 @@
   "bugs": {
     "url": "https://github.com/dora-ljh/figma-export/issues"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=14.0.0"
   },
